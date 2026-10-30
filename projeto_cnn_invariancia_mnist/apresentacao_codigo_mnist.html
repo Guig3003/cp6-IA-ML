@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Apresentação do código CNN e MNIST</title>
+<style>
+@page { size: A4; margin: 18mm; }
+body { font-family: Arial, sans-serif; color: #172033; line-height: 1.45; font-size: 13pt; }
+h1 { color: #123b70; font-size: 30pt; margin-bottom: 8px; }
+h2 { color: #0e5aa7; border-bottom: 2px solid #72a9dc; padding-bottom: 5px; margin-top: 24px; }
+h3 { color: #173f6b; }
+.subtitle { color: #52657a; font-size: 16pt; }
+.box { background: #eef6ff; border-left: 5px solid #2078c9; padding: 12px 16px; margin: 14px 0; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.card { border: 1px solid #b9cbe0; border-radius: 6px; padding: 10px 14px; background: #fbfdff; }
+code, pre { font-family: Consolas, monospace; }
+pre { background: #172033; color: #f1f5f9; padding: 13px; border-radius: 5px; font-size: 10pt; white-space: pre-wrap; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+th { background: #1f5d91; color: white; }
+th, td { border: 1px solid #b9cbe0; padding: 7px; text-align: left; }
+.small { color: #607286; font-size: 10pt; }
+.page { page-break-before: always; }
+ul { margin-top: 5px; }
+</style>
+</head>
+<body>
+<h1>CNNs e invariância no MNIST</h1>
+<p class="subtitle">Breve apresentação do script <code>mnist_cnn_invariancia_augmentation.py</code></p>
+<div class="box"><b>Objetivo:</b> preparar experimentos controlados para verificar se uma CNN mantém a classificação correta quando imagens do MNIST sofrem deslocamento, rotação, ruído, mudança de contraste ou uma combinação dessas transformações.</div>
+<p>O código fornece a base de dados, as transformações, os dataloaders, uma CNN inicial e funções de treinamento e avaliação. Ele pode ser importado por outro script ou executado diretamente para verificar os tamanhos dos batches.</p>
+
+<h2>1. Pergunta do projeto</h2>
+<p>CNNs aprendem padrões locais e usam compartilhamento de pesos e pooling, mas isso não garante invariância completa. O experimento compara o desempenho no MNIST original com versões visualmente alteradas.</p>
+<div class="grid">
+  <div class="card"><b>Invariância</b><br>O resultado deveria permanecer igual depois da transformação.</div>
+  <div class="card"><b>Robustez empírica</b><br>O desempenho permanece aceitável em uma transformação específica.</div>
+  <div class="card"><b>Equivariância</b><br>A representação acompanha a mudança de posição ou forma de maneira previsível.</div>
+  <div class="card"><b>Hipótese</b><br>Augmentation deve melhorar as transformações vistas ou semelhantes durante o treino.</div>
+</div>
+
+<h2>2. Reprodutibilidade</h2>
+<p>A função <code>seed_everything</code> fixa as sementes do Python, NumPy e PyTorch. Também configura o comportamento determinístico da GPU quando ela estiver disponível.</p>
+<pre>seed_everything(seed=42)
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)</pre>
+<p>Isso torna as comparações entre condições mais justas e facilita repetir o experimento.</p>
+
+<div class="page"></div>
+<h2>3. Transformações de teste</h2>
+<table>
+<tr><th>Conjunto</th><th>Transformação</th><th>Pergunta</th></tr>
+<tr><td>original</td><td>Nenhuma</td><td>Qual é a acurácia de referência?</td></tr>
+<tr><td>translated</td><td>Deslocamento fixo de 5×3 pixels</td><td>O pooling tolera mudança de posição?</td></tr>
+<tr><td>rotated</td><td>Rotação fixa de 20 graus</td><td>O modelo reconhece o mesmo dígito inclinado?</td></tr>
+<tr><td>noisy</td><td>Ruído gaussiano</td><td>A decisão depende de detalhes frágeis?</td></tr>
+<tr><td>contrast</td><td>Brilho 0,60 e contraste 1,90</td><td>A normalização preserva o desempenho?</td></tr>
+<tr><td>combined</td><td>Deslocamento + rotação + ruído + contraste</td><td>As perturbações acumuladas provocam falhas?</td></tr>
+</table>
+<p>As classes <code>FixedTranslate</code>, <code>FixedRotate</code>, <code>AddGaussianNoise</code> e <code>FixedBrightnessContrast</code> tornam os testes determinísticos, permitindo comparar exatamente as mesmas condições.</p>
+
+<h2>4. Treino com e sem augmentation</h2>
+<div class="grid">
+<div class="card"><h3>Sem augmentation</h3><p><code>ToTensor → Normalize</code></p><p>O modelo vê apenas imagens MNIST em sua aparência original.</p></div>
+<div class="card"><h3>Com augmentation</h3><p><code>ToTensor → RandomAffine → ruído opcional → Normalize</code></p><p>O modelo recebe variações de posição, escala, cisalhamento e ruído durante o treino.</p></div>
+</div>
+<p>Os dois dataloaders usam o mesmo dataset base, batch size configurável e embaralhamento no treinamento. Os seis dataloaders de teste não embaralham os exemplos.</p>
+
+<div class="page"></div>
+<h2>5. Modelo inicial</h2>
+<pre>Conv2d(1, 16, 3, padding=1)
+ReLU → MaxPool2d(2)
+Conv2d(16, 32, 3, padding=1)
+ReLU → MaxPool2d(2)
+Flatten → Linear(32×7×7, 64)
+ReLU → Linear(64, 10)</pre>
+<p>A entrada possui uma imagem em escala de cinza com 28×28 pixels. Os dois max-poolings reduzem as dimensões para 7×7. A saída possui dez logits, um para cada dígito.</p>
+
+<h2>6. Fluxo de treinamento</h2>
+<ol>
+<li>Selecionar CPU ou GPU.</li>
+<li>Carregar MNIST e criar os dataloaders.</li>
+<li>Instanciar a CNN.</li>
+<li>Usar Adam com learning rate 0,001 e CrossEntropyLoss.</li>
+<li>Executar o forward pass, calcular a loss, fazer backpropagation e atualizar os pesos.</li>
+<li>Avaliar a acurácia nos conjuntos original e transformados.</li>
+</ol>
+<pre>optimizer.zero_grad()
+logits = model(x)
+loss = criterion(logits, y)
+loss.backward()
+optimizer.step()</pre>
+
+<h2>7. Execução</h2>
+<pre>pip install torch torchvision matplotlib numpy
+python mnist_cnn_invariancia_augmentation.py</pre>
+<p>Para executar a demonstração de treinamento, descomente uma das chamadas <code>demo_train_and_evaluate</code> no final do arquivo. O MNIST será baixado automaticamente para <code>./data</code>.</p>
+
+<div class="page"></div>
+<h2>8. Como interpretar os resultados</h2>
+<p>A acurácia no conjunto original é a referência. Para cada transformação, deve-se observar a diferença em relação ao mesmo modelo no teste original.</p>
+<table>
+<tr><th>Resultado observado</th><th>Interpretação</th></tr>
+<tr><td>Queda pequena</td><td>Robustez empírica para aquela transformação.</td></tr>
+<tr><td>Queda grande</td><td>A decisão depende de padrões sensíveis à transformação.</td></tr>
+<tr><td>Augmentation melhora</td><td>O modelo aprendeu a lidar melhor com variações semelhantes.</td></tr>
+<tr><td>Augmentation piora o original</td><td>Existe um possível custo de especialização ou regularização.</td></tr>
+</table>
+<p>Uma conclusão tecnicamente correta deve evitar afirmar que a CNN é automaticamente invariante. O termo mais adequado costuma ser <b>robustez parcial e dependente da transformação</b>.</p>
+
+<h2>9. Conclusão</h2>
+<div class="box">O script cria uma estrutura reproduzível para testar a hipótese central do projeto. CNNs podem apresentar alta acurácia no MNIST original e ainda falhar com pequenas mudanças de posição, rotação, ruído ou contraste. O data augmentation é uma forma prática de ensinar ao modelo quais variações devem ser tratadas como equivalentes.</div>
+<p class="small">Arquivo de referência: mnist_cnn_invariancia_augmentation.py · Projeto acadêmico sobre CNNs, invariância e robustez.</p>
+</body>
+</html>
